@@ -1,0 +1,9 @@
+const express = require("express");
+const router = express.Router();
+const statsController = require("../controllers/statsController");
+const verifyToken = require("../middlewares/authMiddleware");
+router.get("/",verifyToken ,statsController.getStats);
+router.get("/daily",verifyToken ,statsController.getStatsToday);
+router.get("/weekly",verifyToken ,statsController.getStatsWeekly);
+
+module.exports = router;
