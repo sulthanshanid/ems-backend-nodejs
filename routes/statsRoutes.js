@@ -5,5 +5,6 @@ const verifyToken = require("../middlewares/authMiddleware");
 router.get("/",verifyToken ,statsController.getStats);
 router.get("/daily",verifyToken ,statsController.getStatsToday);
 router.get("/weekly",verifyToken ,statsController.getStatsWeekly);
-
+router.get("/dashstats", verifyToken, statsController.getDashboardStats);
+router.get("/recent-activity", verifyToken, statsController.getRecentActivity);
 module.exports = router;

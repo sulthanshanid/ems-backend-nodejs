@@ -3,12 +3,162 @@ const Workplace = require("../models/Workplace");
 const Employee = require("../models/Employee");
 const Attendance = require("../models/Attendance");
 
+
+
+
+// Dummy example data source; replace with your DB/model query
+const activityLog = [
+  { id: 1, userId: 123, user: "John Doe", action: "Marked attendance", timestamp: new Date(Date.now() - 7200000), status: "success" }, // 2h ago
+  { id: 2, userId: 123, user: "Sarah Roy", action: "Added wage slip", timestamp: new Date(Date.now() - 21600000), status: "info" }, // 6h ago
+  { id: 3, userId: 456, user: "Mike Ross", action: "Updated profile", timestamp: new Date(Date.now() - 3600000), status: "warning" }, // 1h ago
+];
+
+exports.getRecentActivity = async (req, res) => {
+  try {
+    const ownerId = req.user.id;
+
+    // Filter by user (owner) — replace with your DB query
+    const userActivities = activityLog
+
+    // Format time using moment-timezone, e.g. "2h ago"
+    const activities = userActivities.map((item) => ({
+      id: item.id,
+      user: item.user,
+      action: item.action,
+      time: moment(item.timestamp).fromNow(),
+      status: item.status,
+    }));
+
+    res.json(activities);
+  } catch (error) {
+    console.error("Error fetching recent activity:", error);
+    res.status(500).json({ message: "Failed to fetch recent activity" });
+  }
+};
+
+exports.getDashboardStats = async (req, res) => {
+  try {
+    const ownerId = req.user.id;
+
+    // Total employees under owner
+    const totalEmployees = await Employee.countDocuments({ owner: ownerId });
+
+    // Employee IDs under owner
+    const employeeIds = await Employee.find({ owner: ownerId }).distinct("_id");
+
+    // Current year date range (UTC)
+    const currentYear = moment.utc().year();
+    const yearStart = moment.utc([currentYear, 0, 1]).startOf("day").toDate();
+    const yearEnd = moment.utc([currentYear, 11, 31]).endOf("day").toDate();
+
+    // Monthly wages aggregation
+    const monthlyWagesAgg = await Attendance.aggregate([
+      {
+        $match: {
+          employee_id: { $in: employeeIds },
+          date: { $gte: yearStart, $lte: yearEnd },
+        },
+      },
+      {
+        $group: {
+          _id: { month: { $month: "$date" } },
+          wage: { $sum: "$wage" },
+        },
+      },
+      { $sort: { "_id.month": 1 } },
+    ]);
+    console.log("Monthly Wages Aggregation:", monthlyWagesAgg);
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const monthlyWages = monthlyWagesAgg.map(m => ({
+      month: monthNames[m._id.month - 1],
+      wage: m.wage
+    }));
+
+    // Today range (UTC)
+    const todayStart = moment.utc().startOf("day").toDate();
+    const todayEnd = moment.utc().endOf("day").toDate();
+
+    // Present count for today
+    const presentAgg = await Attendance.aggregate([
+      {
+        $match: {
+          employee: { $in: employeeIds },
+          date: { $gte: todayStart, $lte: todayEnd },
+          status: "Present", // adjust if your status values differ
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          presentCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const present = presentAgg.length > 0 ? presentAgg[0].presentCount : 0;
+    const absent = totalEmployees - present;
+
+    res.json({
+      success: true,
+      monthlyWages,
+      today: { present, absent },
+    });
+
+  } catch (error) {
+    console.error("Error fetching dashboard stats:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
 exports.getStats = async (req, res) => {
   try {
-    const workplaces = await Workplace.find({ owner: req.user.id }).lean();
-    res.render("stats", { workplaces });
-  } catch (err) {
-    res.status(500).send("Error fetching workplaces.");
+    const ownerId = req.user.id; // set by auth middleware
+    console.log("Owner ID:", ownerId);
+
+    // 1️⃣ Count total employees under this owner
+    const totalEmployees = await Employee.countDocuments({ owner: ownerId });
+    const totalWorkplaces = await Workplace.countDocuments({ owner: ownerId });
+    // 2️⃣ Get start & end of current year in UTC
+    const currentYear = moment.utc().year();
+    const yearStart = moment.utc([currentYear, 0, 1]).startOf("day").toDate(); // Jan 1 UTC
+    const yearEnd = moment.utc([currentYear, 11, 31]).endOf("day").toDate(); // Dec 31 UTC
+
+    // 3️⃣ Get employee IDs under this owner
+    const employeeIds = await Employee.find({ owner: ownerId }).distinct("_id");
+
+    // 4️⃣ Sum wages for those employees in the current year
+    const wageResult = await Attendance.aggregate([
+      {
+        $match: {
+          employee_id: { $in: employeeIds },
+          date: {
+            $gte: yearStart,
+            $lte: yearEnd,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWage: { $sum: "$wage" },
+        },
+      },
+    ]);
+
+    const totalWage = wageResult.length > 0 ? wageResult[0].totalWage : 0;
+
+    res.json({
+      success: true,
+      data: {
+        totalEmployees,
+        totalWage,
+        totalWorkplaces,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching stats:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
