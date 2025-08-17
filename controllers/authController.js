@@ -6,9 +6,9 @@ const SECRET_KEY = process.env.SECRET_KEY || "your_secret_key";
 
 exports.signup = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password ,phone} = req.body;
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !phone) {
       return res.status(400).json({ message: "Name, email and password are required" });
     }
 
@@ -23,6 +23,7 @@ exports.signup = async (req, res) => {
       name,
       email,
       password: hashedPassword,
+      phone
     });
 
     await user.save();
@@ -86,7 +87,7 @@ exports.updateProfile = async (req, res) => {
     if (name) user.name = name;
     if (email) user.email = email;
     if (phone) user.phone = phone;
-
+    
     await user.save();
 
     const updatedUser = await User.findById(req.user.id).select("-password");

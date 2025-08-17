@@ -49,21 +49,26 @@ exports.saveAttendanceRecords = async (req, res) => {
       }
     }
 
-    // Upsert each record with owner added
-    const ops = records.map((rec) => ({
-      updateOne: {
-        filter: {
-          employee_id: rec.employee_id,
-          workplace_id: rec.workplace_id,
-          date: new Date(rec.date),
-          owner: req.user.id, // Add owner to filter too to update only owned records
+    // Upsert each record
+    const ops = records.map((rec) => {
+      const cleanRec = { ...rec };
+      delete cleanRec._id; // 🚀 Prevent duplicate key error
+
+      return {
+        updateOne: {
+          filter: {
+            employee_id: rec.employee_id,
+            workplace_id: rec.workplace_id,
+            date: new Date(rec.date),
+            owner: req.user.id,
+          },
+          update: {
+            $set: { ...cleanRec, owner: req.user.id },
+          },
+          upsert: true,
         },
-        update: {
-          $set: { ...rec, owner: req.user.id }, // Also set owner on upsert
-        },
-        upsert: true,
-      },
-    }));
+      };
+    });
 
     await Attendance.bulkWrite(ops);
 
@@ -73,6 +78,7 @@ exports.saveAttendanceRecords = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
 // controllers/attendanceController.js
 
 const Loan = require("../models/Loan");
@@ -159,54 +165,57 @@ exports.getAttendanceSummary = async (req, res) => {
       };
 
       allDates.forEach((dateObj) => {
-        const rec = attendanceRecords.find(
+        const recs = attendanceRecords.filter(
           (r) =>
             r.employee_id._id.equals(emp._id) &&
             r.date.toISOString().slice(0, 10) ===
               dateObj.toISOString().slice(0, 10)
         );
 
-        let status = "absent";
-        let wage = 0;
-        let overtimeWage = 0;
-        let workplaceName = null;
-
-        if (rec) {
-          status = rec.status;
-          wage = rec.wage || 0;
-
-          const empWage = emp.wage || 0;
-          if (wage > empWage) {
-            overtimeWage = wage - empWage;
-          }
-
-          if (rec.workplace_id) {
-            workplaceName = rec.workplace_id.name || null;
-          }
-
-          if (status === "present") summary[emp._id].totalPresent++;
-          if (status === "absent") summary[emp._id].totalAbsent++;
-        } else {
+        if (recs.length === 0) {
+          // No records at all => absent
           summary[emp._id].totalAbsent++;
+          summary[emp._id].days.push({
+            date: new Date(dateObj),
+            status: "absent",
+            workplace: null,
+            wage: 0,
+            overtimeWage: 0,
+          });
+        } else {
+          recs.forEach((rec) => {
+            let status = rec.status;
+            let wage = rec.wage || 0;
+            let overtimeWage = 0;
+            let workplaceName = rec.workplace_id ? rec.workplace_id.name : null;
+
+            const empWage = emp.wage || 0;
+            if (wage > empWage) {
+              overtimeWage = wage - empWage;
+            }
+
+            if (status === "present") summary[emp._id].totalPresent++;
+            if (status === "absent") summary[emp._id].totalAbsent++;
+
+            summary[emp._id].totalWage += wage;
+            summary[emp._id].totalOvertimeWage += overtimeWage;
+
+            if (workplaceName) {
+              if (!summary[emp._id].workplaces[workplaceName]) {
+                summary[emp._id].workplaces[workplaceName] = 0;
+              }
+              summary[emp._id].workplaces[workplaceName]++;
+            }
+
+            summary[emp._id].days.push({
+              date: new Date(dateObj),
+              status,
+              workplace: workplaceName,
+              wage,
+              overtimeWage,
+            });
+          });
         }
-
-        summary[emp._id].totalWage += wage;
-        summary[emp._id].totalOvertimeWage += overtimeWage;
-
-        if (workplaceName) {
-          if (!summary[emp._id].workplaces[workplaceName]) {
-            summary[emp._id].workplaces[workplaceName] = 0;
-          }
-          summary[emp._id].workplaces[workplaceName]++;
-        }
-
-        summary[emp._id].days.push({
-          date: new Date(dateObj),
-          status,
-          workplace: workplaceName,
-          wage,
-          overtimeWage,
-        });
       });
 
       // Final salary after loans & deductions

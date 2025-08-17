@@ -28,12 +28,12 @@ exports.getWorkplaceById = async (req, res) => {
 // Create new workplace
 exports.createWorkplace = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name,location } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Workplace name is required" });
     }
 
-    const newWorkplace = new Workplace({ name: name.trim(), owner: req.user.id });
+    const newWorkplace = new Workplace({ name: name.trim(), owner: req.user.id,location: location.trim() });
     await newWorkplace.save();
 
     res.json({ message: "Workplace added", workplace: newWorkplace });
@@ -48,6 +48,7 @@ exports.updateWorkplace = async (req, res) => {
   try {
     const { id } = req.params;
     const { name } = req.body;
+    const { location } = req.body;  
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Workplace name is required" });
@@ -57,6 +58,7 @@ exports.updateWorkplace = async (req, res) => {
     if (!workplace) return res.status(404).json({ message: "Workplace not found" });
 
     workplace.name = name.trim();
+    workplace.location = location ? location.trim() : workplace.location; // Update location only if provided
     await workplace.save();
 
     res.json({ message: "Workplace updated", workplace });

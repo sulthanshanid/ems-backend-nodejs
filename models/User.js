@@ -11,7 +11,9 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
     password: { type: String, required: true },
+    phone: { type: String, required: true, trim: true },
   },
+  
   { timestamps: true }
 );
 

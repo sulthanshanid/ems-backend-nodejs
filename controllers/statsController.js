@@ -3,14 +3,32 @@ const Workplace = require("../models/Workplace");
 const Employee = require("../models/Employee");
 const Attendance = require("../models/Attendance");
 
-
-
-
 // Dummy example data source; replace with your DB/model query
 const activityLog = [
-  { id: 1, userId: 123, user: "John Doe", action: "Marked attendance", timestamp: new Date(Date.now() - 7200000), status: "success" }, // 2h ago
-  { id: 2, userId: 123, user: "Sarah Roy", action: "Added wage slip", timestamp: new Date(Date.now() - 21600000), status: "info" }, // 6h ago
-  { id: 3, userId: 456, user: "Mike Ross", action: "Updated profile", timestamp: new Date(Date.now() - 3600000), status: "warning" }, // 1h ago
+  {
+    id: 1,
+    userId: 123,
+    user: "John Doe",
+    action: "Marked attendance",
+    timestamp: new Date(Date.now() - 7200000),
+    status: "success",
+  }, // 2h ago
+  {
+    id: 2,
+    userId: 123,
+    user: "Sarah Roy",
+    action: "Added wage slip",
+    timestamp: new Date(Date.now() - 21600000),
+    status: "info",
+  }, // 6h ago
+  {
+    id: 3,
+    userId: 456,
+    user: "Mike Ross",
+    action: "Updated profile",
+    timestamp: new Date(Date.now() - 3600000),
+    status: "warning",
+  }, // 1h ago
 ];
 
 exports.getRecentActivity = async (req, res) => {
@@ -18,7 +36,7 @@ exports.getRecentActivity = async (req, res) => {
     const ownerId = req.user.id;
 
     // Filter by user (owner) — replace with your DB query
-    const userActivities = activityLog
+    const userActivities = activityLog;
 
     // Format time using moment-timezone, e.g. "2h ago"
     const activities = userActivities.map((item) => ({
@@ -68,10 +86,23 @@ exports.getDashboardStats = async (req, res) => {
       { $sort: { "_id.month": 1 } },
     ]);
     console.log("Monthly Wages Aggregation:", monthlyWagesAgg);
-    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    const monthlyWages = monthlyWagesAgg.map(m => ({
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const monthlyWages = monthlyWagesAgg.map((m) => ({
       month: monthNames[m._id.month - 1],
-      wage: m.wage
+      wage: m.wage,
     }));
 
     // Today range (UTC)
@@ -103,13 +134,11 @@ exports.getDashboardStats = async (req, res) => {
       monthlyWages,
       today: { present, absent },
     });
-
   } catch (error) {
     console.error("Error fetching dashboard stats:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
 
 exports.getStats = async (req, res) => {
   try {
@@ -195,7 +224,7 @@ exports.getStatsToday = async (req, res) => {
           as: "workplace",
         },
       },
-      { $unwind: "$workplace" },
+      { $unwind: { path: "$workplace", preserveNullAndEmptyArrays: true } }, // allow null workplace
       {
         $addFields: {
           overtime_wage: {
@@ -209,55 +238,33 @@ exports.getStatsToday = async (req, res) => {
       },
       {
         $group: {
-          _id: "$workplace._id",
+          _id: {
+            workplace: "$workplace._id", // group by workplace
+            employee: "$employee._id", // and by employee, so multiple entries are kept
+          },
           workplace_name: { $first: "$workplace.name" },
-          presentEmployees: {
+          employee: { $first: "$employee" },
+          records: {
             $push: {
-              $cond: [
-                { $eq: ["$status", "present"] },
-                {
-                  employee_id: "$employee._id",
-                  name: "$employee.name",
-                  basic_wage: "$employee.basic_wage",
-                  overtime_wage: "$overtime_wage",
-                  total_daily_wage: "$wage",
-                },
-                "$$REMOVE",
-              ],
+              status: "$status",
+              wage: "$wage",
+              overtime_wage: "$overtime_wage",
             },
           },
-          absentEmployees: {
-            $push: {
-              $cond: [
-                { $eq: ["$status", "absent"] },
-                {
-                  employee_id: "$employee._id",
-                  name: "$employee.name",
-                  basic_wage: "$employee.basic_wage",
-                  overtime_wage: 0,
-                  total_daily_wage: "$wage",
-                },
-                "$$REMOVE",
-              ],
-            },
-          },
-          totalSalary: { $sum: "$wage" },
         },
       },
       {
-        $project: {
-          workplace_name: 1,
-          presentCount: { $size: "$presentEmployees" },
-          absentCount: { $size: "$absentEmployees" },
-          total: {
-            $add: [
-              { $size: "$presentEmployees" },
-              { $size: "$absentEmployees" },
-            ],
+        $group: {
+          _id: "$_id.workplace",
+          workplace_name: { $first: "$workplace_name" },
+          employees: {
+            $push: {
+              employee_id: "$employee._id",
+              name: "$employee.name",
+              basic_wage: "$employee.basic_wage",
+              records: "$records",
+            },
           },
-          presentEmployees: 1,
-          absentEmployees: 1,
-          totalSalary: 1,
         },
       },
     ]);
@@ -270,12 +277,53 @@ exports.getStatsToday = async (req, res) => {
       });
     }
 
+    // Format to include present / absent lists
+    const workplaces = data.map((workplace) => {
+      const presentEmployees = [];
+      const absentEmployees = [];
+      let totalSalary = 0;
+
+      workplace.employees.forEach((emp) => {
+        emp.records.forEach((rec) => {
+          totalSalary += rec.wage;
+
+          if (rec.status === "present") {
+            presentEmployees.push({
+              employee_id: emp.employee_id,
+              name: emp.name,
+              basic_wage: emp.basic_wage,
+              overtime_wage: rec.overtime_wage,
+              total_daily_wage: rec.wage,
+            });
+          } else {
+            absentEmployees.push({
+              employee_id: emp.employee_id,
+              name: emp.name,
+              basic_wage: emp.basic_wage,
+              overtime_wage: 0,
+              total_daily_wage: rec.wage,
+            });
+          }
+        });
+      });
+
+      return {
+        workplace_name: workplace.workplace_name,
+        presentCount: presentEmployees.length,
+        absentCount: absentEmployees.length,
+        total: presentEmployees.length + absentEmployees.length,
+        presentEmployees,
+        absentEmployees,
+        totalSalary,
+      };
+    });
+
     // Calculate overall totals
-    const totals = data.reduce(
-      (acc, workplace) => {
-        acc.totalPresent += workplace.presentCount;
-        acc.totalAbsent += workplace.absentCount;
-        acc.totalSalary += workplace.totalSalary;
+    const totals = workplaces.reduce(
+      (acc, w) => {
+        acc.totalPresent += w.presentCount;
+        acc.totalAbsent += w.absentCount;
+        acc.totalSalary += w.totalSalary;
         return acc;
       },
       { totalPresent: 0, totalAbsent: 0, totalSalary: 0 }
@@ -283,10 +331,11 @@ exports.getStatsToday = async (req, res) => {
 
     res.json({
       date: moment().tz("Asia/Dubai").format("YYYY-MM-DD"),
-      workplaces: data,
+      workplaces,
       totals,
     });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 };
